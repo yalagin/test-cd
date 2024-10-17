@@ -62,6 +62,7 @@ jobs:
       - name: 📋 Get Commits since last Release
         id: changes
         uses: simbo/changes-since-last-release-action@v1
+        
 
       - name: Create Release
         id: create_release
