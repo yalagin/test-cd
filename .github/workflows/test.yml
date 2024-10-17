@@ -1,0 +1,77 @@
+name: Release Automation
+run-name: ${{ github.actor }} is deploying on prod 🚀
+
+env:
+  AWS_ECR_REPOSITORY_PHP: "goproblems-php"
+  AWS_ECR_REPOSITORY_NGINX: "goproblems-nginx"
+  MAILER_DEFAULT_SOURCE: "goproblems@goproblems.com"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create_release:
+    runs-on: ubuntu-latest
+    outputs:
+      next_version: ${{ steps.next_release_tag.outputs.next_version }}
+      next_commit_info: ${{ steps.changes.outputs.log }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+      - name: Get latest release tag
+        id: get_latest_release
+        run: |
+          latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null || echo "none")
+          echo "LATEST_TAG=$latest_tag" >> $GITHUB_ENV
+
+      - name: Determine next release tag
+        id: next_release_tag
+        run: |
+          latest_tag=${{ env.LATEST_TAG }}
+          
+          if [[ "$latest_tag" == "none" ]]; then
+            # No previous tags, start with version 0.1.0
+            next_version="0.1.0"
+          else
+            IFS='.' read -r -a version_parts <<< "$latest_tag"
+            latest_tag_commit_date=$(git log -1 --format=%ct $latest_tag)
+            today=$(date +%s)
+            today_date=$(date -d @$today +%Y-%m-%d)
+            latest_date=$(date -d @$latest_tag_commit_date +%Y-%m-%d)
+          
+            if [[ "$today_date" == "$latest_date" ]]; then
+              # Increment fourth digit
+              next_version="${version_parts[0]}.${version_parts[1]}.${version_parts[2]}.$((version_parts[3] + 1))"
+            else
+              # Increment third digit
+              next_version="${version_parts[0]}.${version_parts[1]}.$((version_parts[2] + 1)).0"
+            fi
+          fi
+          
+          echo "next_version=${next_version}" >> $GITHUB_OUTPUT
+
+      - name: 📋 Get Commits since last Release
+        id: changes
+        uses: simbo/changes-since-last-release-action@v1
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.next_release_tag.outputs.next_version }}
+          release_name: Release ${{ steps.next_release_tag.outputs.next_version }}
+          body: ${{ steps.changes.outputs.log }}
+          draft: false
+          prerelease: false
+
